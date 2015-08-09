@@ -1528,8 +1528,8 @@ int static macauth_radius(struct app_conn_t *appconn) {
   }
   appconn->proxyuserlen = strlen(appconn->proxyuser);
 
-  (void) radius_addattr(radius, &radius_pack, RADIUS_ATTR_USER_NAME, 0, 0, 0,
-			(uint8_t*) appconn->proxyuser, appconn->proxyuserlen);
+//  (void) radius_addattr(radius, &radius_pack, RADIUS_ATTR_USER_NAME, 0, 0, 0,
+//			(uint8_t*) appconn->proxyuser, appconn->proxyuserlen);
 
   (void) radius_addattr(radius, &radius_pack, RADIUS_ATTR_USER_PASSWORD, 0, 0, 0,
 		 (uint8_t*) options.macpasswd, strlen(options.macpasswd));
@@ -1538,7 +1538,10 @@ int static macauth_radius(struct app_conn_t *appconn) {
 
   (void) radius_addattr(radius, &radius_pack, RADIUS_ATTR_CALLING_STATION_ID, 0, 0, 0,
 		 (uint8_t*) mac, MACSTRLEN);
-  
+
+  (void) radius_addattr(radius, &radius_pack, RADIUS_ATTR_USER_NAME, 0, 0, 0,
+			(uint8_t*) mac, MACSTRLEN);
+
   /* Include our MAC address */
   if (options.radiuscalled)
     (void) radius_addattr(radius, &radius_pack, RADIUS_ATTR_CALLED_STATION_ID, 0, 0, 0,
@@ -1796,8 +1799,8 @@ int static acct_req(struct app_conn_t *conn, int status_type)
   (void) radius_addattr(radius, &radius_pack, RADIUS_ATTR_ACCT_STATUS_TYPE, 0, 0,
 		 status_type, NULL, 0);
 
-  (void) radius_addattr(radius, &radius_pack, RADIUS_ATTR_USER_NAME, 0, 0, 0,
-		 (uint8_t*) conn->user, conn->userlen);
+//  (void) radius_addattr(radius, &radius_pack, RADIUS_ATTR_USER_NAME, 0, 0, 0,
+//		 (uint8_t*) conn->user, conn->userlen);
 
   if (conn->classlen) {
     (void) radius_addattr(radius, &radius_pack, RADIUS_ATTR_CLASS, 0, 0, 0,
@@ -1812,6 +1815,9 @@ int static acct_req(struct app_conn_t *conn, int status_type)
 
   (void) radius_addattr(radius, &radius_pack, RADIUS_ATTR_CALLING_STATION_ID, 0, 0, 0,
 		 (uint8_t*) mac, MACSTRLEN);
+
+  (void) radius_addattr(radius, &radius_pack, RADIUS_ATTR_USER_NAME, 0, 0, 0,
+         (uint8_t*) mac, conn->userlen);
 
   (void) snprintf(mac, MACSTRLEN+1, "%.2X-%.2X-%.2X-%.2X-%.2X-%.2X",
 	   conn->ourmac[0], conn->ourmac[1],
@@ -2133,8 +2139,8 @@ int cb_tun_ind(struct tun_t *tun, void *pack, unsigned len) {
   struct tun_packet_t *iph = (struct tun_packet_t*) pack;
   struct app_conn_t *appconn;
 
-  if (options.debug) 
-    printf("cb_tun_ind. Packet received: Forwarding to link layer\n");
+//  if (options.debug) 
+//    printf("cb_tun_ind. Packet received: Forwarding to link layer\n");
   
   dst.s_addr = iph->dst;
 
@@ -3624,9 +3630,9 @@ int cb_dhcp_data_ind(struct dhcp_conn_t *conn, void *pack, unsigned len) {
   struct tun_packet_t *iph = (struct tun_packet_t*) pack;
   struct app_conn_t *appconn = conn->peer;
 
-  if (options.debug)
-    printf("cb_dhcp_data_ind. Packet received. DHCP authstate: %d\n", 
-	   conn->authstate);
+//  if (options.debug)
+//    printf("cb_dhcp_data_ind. Packet received. DHCP authstate: %d\n", 
+//	   conn->authstate);
 
   if (iph->src != conn->hisip.s_addr) {
     if (options.debug) printf("Received packet with spoofed source!!!\n");

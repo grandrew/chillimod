@@ -471,72 +471,34 @@ static int redir_reply(struct redir_t *redir, int fd,
 
   if (resp) {
     snprintf(buffer, sizeof(buffer), 
-	     "HTTP/1.0 302 Moved Temporarily\r\n"
-	     "Location: %s?res=%s&uamip=%s&uamport=%d", 
-	     redir->url, resp, inet_ntoa(redir->addr), redir->port);
+      "HTTP/1.0 302 Moved Temporarily\r\n"
+      "Location: %s?switch_url=http://1.1.1.1/login.html&wlan=MosMetro_Free&ap_mac=c4:6e:1f:07:3a:78", redir->url);
     buffer[sizeof(buffer)-1] = 0;
   }
   else {
-    snprintf(buffer, sizeof(buffer), "HTTP/1.0 200 OK\r\n");
-    buffer[sizeof(buffer)-1] = 0;
-  }
+ snprintf(buffer, sizeof(buffer), "HTTP/1.0 200 OK\r\n");
+ buffer[sizeof(buffer)-1] = 0;
+ }
+ 
+ if (userurl) {
+ char mid2[REDIR_MAXBUFFER];
+ mid2[0] = 0;
+ (void)redir_urlencode(userurl, strlen(userurl), mid2, sizeof(mid2));
+ redir_stradd(buffer, sizeof(buffer), "&redirect=%s", mid2);
+ }
 
-  if (hexchal) {
-    redir_stradd(buffer, sizeof(buffer), "&challenge=%s", hexchal);
-  }
-  
-  if (uid) {
-    char mid2[REDIR_MAXBUFFER];
-    mid2[0] = 0;
-    (void)redir_urlencode(uid, strlen(uid), mid2, sizeof(mid2));
-    redir_stradd(buffer, sizeof(buffer), "&uid=%s", mid2);
-  }
-  
-  if (timeleft) {
-    redir_stradd(buffer, sizeof(buffer), "&timeleft=%ld", timeleft);
-  }
-  
-  if (userurl) {
-    char mid2[REDIR_MAXBUFFER];
-    mid2[0] = 0;
-    (void)redir_urlencode(userurl, strlen(userurl), mid2, sizeof(mid2));
-    redir_stradd(buffer, sizeof(buffer), "&userurl=%s", mid2);
-  }
+ if (hismac) {
+ char mac[REDIR_MACSTRLEN+1];
+ char mid2[REDIR_MAXBUFFER];
+ mid2[0] = 0;
+ snprintf(mac, REDIR_MACSTRLEN+1, "%.2x:%.2x:%.2x:%.2x:%.2x:%.2x",
+ hismac[0], hismac[1],
+ hismac[2], hismac[3],
+ hismac[4], hismac[5]);
+// (void)redir_urlencode(mac, strlen(mac), mid2, sizeof(mid2));
+ redir_stradd(buffer, sizeof(buffer), "&client_mac=%s", mac);
+ }
 
-  if (reply) {
-    char mid2[REDIR_MAXBUFFER];
-    mid2[0] = 0;
-    (void)redir_urlencode(reply, strlen(reply), mid2, sizeof(mid2));
-    redir_stradd(buffer, sizeof(buffer), "&reply=%s", mid2);
-  }
-
-  if (redir->radiusnasid) {
-    char mid2[REDIR_MAXBUFFER];
-    mid2[0] = 0;
-    (void)redir_urlencode(redir->radiusnasid, strlen(redir->radiusnasid),
-		    mid2, sizeof(mid2));
-    redir_stradd(buffer, sizeof(buffer), "&nasid=%s", mid2);
-  }
-
-  if (redirurl) {
-    char mid2[REDIR_MAXBUFFER];
-    mid2[0] = 0;
-    (void)redir_urlencode(redirurl, strlen(redirurl), 
-		    mid2, sizeof(mid2));
-    redir_stradd(buffer, sizeof(buffer), "&redirurl=%s", mid2);
-  }
-
-  if (hismac) {
-    char mac[REDIR_MACSTRLEN+1];
-    char mid2[REDIR_MAXBUFFER];
-    mid2[0] = 0;
-    snprintf(mac, REDIR_MACSTRLEN+1, "%.2X-%.2X-%.2X-%.2X-%.2X-%.2X",
-	     hismac[0], hismac[1],
-	     hismac[2], hismac[3],
-	     hismac[4], hismac[5]);
-    (void)redir_urlencode(mac, strlen(mac), mid2, sizeof(mid2));
-    redir_stradd(buffer, sizeof(buffer), "&mac=%s", mid2);
-  }
   
   redir_stradd(buffer, sizeof(buffer), 
 	       "\r\n"
@@ -691,66 +653,66 @@ void redir_set(struct redir_t *redir, int debug,
 }
 
 
-/* Get the path of an HTTP request */
 static int redir_getpath(struct redir_t *redir, char *src, char *dst, int dstsize) {
 
-  char *p1;
-  char *p2;
-  char *p3;
-  char *peol;
-  int dstlen = 0;
+ char *p1;
+ char *p2;
+ char *p3;
+ char *peol;
+ int dstlen = 0;
 
-  if (!(peol = strstr(src, "\n"))) /* End of the first line */
-    return -1;
+ if (!(peol = strstr(src, "\n"))) /* End of the first line */
+ return -1;
 
-  if (!strncmp("GET ", src, 4)) {
-    p1 = src + 4;
-  }
-  else if (!strncmp("HEAD ", src, 5)) {
-    p1 = src + 5;
-  }
-  else {
-    return -1;
-  }
+ if (!strncmp("GET ", src, 4)) {
+ p1 = src + 4;
+ }
+ else if (!strncmp("HEAD ", src, 5)) {
+ p1 = src + 5;
+ }
+ else if (!strncmp("POST ", src, 5)) {
+ p1 = src + 5;
+ } else {
+ return -1;
+ }
 
-  while (*p1 == ' ') p1++; /* Advance through additional white space */
-  
-  if (*p1 == '/')
-    p1++;
-  else
-    return -1;
+ while (*p1 == ' ') p1++; /* Advance through additional white space */
+ 
+ if (*p1 == '/')
+ p1++;
+ else
+ return -1;
 
-  /* The path ends with a ? or a space */
-  p2 = strstr(p1, "?");
-  p3 = strstr(p1, " ");
+ /* The path ends with a ? or a space */
+ p2 = strstr(p1, "?");
+ p3 = strstr(p1, " ");
 
-  if ((p2 == NULL) && (p3 == NULL))  /* Not found at all */
-    return -1;
+ if ((p2 == NULL) && (p3 == NULL)) /* Not found at all */
+ return -1;
 
-  if ((p2 >= peol) && (p3 >= peol)) /* Not found on first line */
-    return -1;
+ if ((p2 >= peol) && (p3 >= peol)) /* Not found on first line */
+ return -1;
 
-  if (p2 && !p3) {
-    dstlen = p2-p1;
-  } 
-  else if (!p2 && p3) {
-    dstlen = p3-p1;
-  } 
-  else if (p3>p2)
-    dstlen = p2-p1;
-  else
-    dstlen = p3-p1;
+ if (p2 && !p3) {
+ dstlen = p2-p1;
+ } 
+ else if (!p2 && p3) {
+ dstlen = p3-p1;
+ } 
+ else if (p3>p2)
+ dstlen = p2-p1;
+ else
+ dstlen = p3-p1;
 
-  if (dstlen>=dstsize)
-    return -1;
+ if (dstlen>=dstsize)
+ return -1;
 
-  strncpy(dst, p1, dstlen);
-  dst[dstlen] = 0;
+ strncpy(dst, p1, dstlen);
+ dst[dstlen] = 0;
 
-  /*printf("The path is: %s\n", dst); */
+ if (optionsdebug) printf("The path is: %s\n", dst);
 
-  return 0;
-
+ return 0;
 }
 
 /* Get the url of an HTTP request */
@@ -778,6 +740,9 @@ static int redir_geturl(struct redir_t *redir, char *src, char *dst, int dstsize
     p1 = src + 4;
   }
   else if (!strncmp("HEAD ", src, 5)) {
+    p1 = src + 5;
+  }
+  else if (!strncmp("POST ", src, 5)) {
     p1 = src + 5;
   }
   else {
@@ -947,7 +912,7 @@ static int redir_getreq(struct redir_t *redir, int fd, struct redir_conn_t *conn
   }
 
   if (redir_getpath(redir, buffer, path, sizeof(path))) {
-    if (optionsdebug) printf("Could not parse path!\n");
+    if (optionsdebug) printf("Could not parse path: %s\n", buffer);
     return -1;
   }
 
@@ -955,6 +920,12 @@ static int redir_getreq(struct redir_t *redir, int fd, struct redir_conn_t *conn
 		     conn->userurl, sizeof(conn->userurl))) {
     if (optionsdebug) printf("User URL: %s!\n", conn->userurl);
   }
+
+  if (!strcmp(path, "login.html")) {
+    conn->type = REDIR_LOGIN;
+    return 0;
+  }
+  else
   
   if ((!strcmp(path, "logon")) || (!strcmp(path, "login"))) {
     if (redir_getparam(redir, buffer, "username", 
@@ -1340,8 +1311,8 @@ static int redir_radius(struct redir_t *redir, struct in_addr *addr,
 
   radius_default_pack(radius, &radius_pack, RADIUS_CODE_ACCESS_REQUEST);
   
-  radius_addattr(radius, &radius_pack, RADIUS_ATTR_USER_NAME, 0, 0, 0,
-		 (uint8_t*) conn->username, strlen(conn->username));
+//  radius_addattr(radius, &radius_pack, RADIUS_ATTR_USER_NAME, 0, 0, 0,
+//		 (uint8_t*) conn->username, strlen(conn->username));
 
   if (redir->secret) {
     /* Get MD5 hash on challenge and uamsecret */
@@ -1385,6 +1356,10 @@ static int redir_radius(struct redir_t *redir, struct in_addr *addr,
   
   radius_addattr(radius, &radius_pack, RADIUS_ATTR_CALLING_STATION_ID, 0, 0, 0,
 		 (uint8_t*) mac, REDIR_MACSTRLEN);
+
+  radius_addattr(radius, &radius_pack, RADIUS_ATTR_USER_NAME, 0, 0, 0,
+		 (uint8_t*) mac, REDIR_MACSTRLEN);
+
   
   if (redir->radiuscalled)
     radius_addattr(radius, &radius_pack, RADIUS_ATTR_CALLED_STATION_ID, 0, 0, 0,
