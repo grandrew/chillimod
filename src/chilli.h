@@ -50,10 +50,10 @@
 /* If the constants below are defined packets which have been dropped
    by the traffic shaper will be counted towards accounting and
    volume limitation */
-/* #define COUNT_DOWNLINK_DROP 1 */
-/* #define COUNT_UPLINK_DROP 1 */
+#define COUNT_DOWNLINK_DROP 1 
+#define COUNT_UPLINK_DROP 1 
 
-#define APP_NUM_CONN 1024
+#define APP_NUM_CONN 128
 #define EAP_LEN 2048            /* TODO: Rather large */
 
 #define MACOK_MAX 16
@@ -68,7 +68,7 @@
 #define CHALLENGESIZE 24 /* From chap.h MAX_CHALLENGE_LENGTH */
 #define USERURLSIZE 256  /* Max length of URL requested by user */
 
-#define BUCKET_SIZE  300000 /* Size of leaky bucket (~200 packets) */
+//#define BUCKET_SIZE  300000 /* Size of leaky bucket (~200 packets) */
 
 /* Time length of leaky bucket in milliseconds */
 /* Bucket size = BUCKET_TIME * Bandwidth-Max radius attribute */
@@ -194,12 +194,14 @@ struct app_conn_t {
   struct in_addr dns1;
   struct in_addr dns2;
   struct timeval last_time; /* Last time a packet was received or sent */
+  struct timeval last_up_time; /* Last time a packet was received or sent */
+  struct timeval last_down_time; /* Last time a packet was received or sent */
 
   /* Leaky bucket */
-  uint32_t bucketup;
-  uint32_t bucketdown;
-  uint32_t bucketupsize;
-  uint32_t bucketdownsize;
+  uint64_t bucketup;
+  uint64_t bucketdown;
+  uint64_t bucketupsize;
+  uint64_t bucketdownsize;
 
   /* UAM information */
   uint8_t uamchal[REDIR_MD5LEN];
@@ -305,6 +307,11 @@ struct options_t {
   int macoklen;                   /* Number of MAC addresses */
   char* macsuffix;               /* Suffix to add to MAC address */
   char* macpasswd;               /* Password to use for MAC authentication */  
+  struct in_addr rmtlisten;      /* IP address of remote monitor and config */
+  int rmtport;                   /* TCP port to listen to monitor and config*/
+  char* rmtpasswd;               /* Password to use for MAC authentication */  
+	int bandwidthmaxup;            /* Default Max Up Bandwith setting */
+	int bandwidthmaxdown;          /* Default Max Up Bandwith setting */
 };
 
 extern struct app_conn_t connection[APP_NUM_CONN];

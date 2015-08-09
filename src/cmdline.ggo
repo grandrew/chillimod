@@ -119,3 +119,12 @@ option "macallowed"  - "List of allowed MAC addresses" string no multiple
 option "macsuffix"   - "Suffix to add to the MAC address" string no
 option "macpasswd"   - "Password used when performing MAC authentication" string default="password" no
 
+# Remote Monitor and Config
+option "rmtlisten"   - "IP address to listen to for authentication requests" string default="127.0.0.1" no
+option "rmtport"     - "TCP port to bind to for authentication requests" int default="3991" no
+option "rmtpasswd"   - "Password used when performing MAC authentication" string no
+
+# Extra settings
+option "bandwidthmaxup" - "Default bandwidth control to apply when account don't have setting" int no
+option "bandwidthmaxdown" - "Default bandwidth control to apply when account don't have setting" int no
+

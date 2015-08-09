@@ -102,6 +102,7 @@
 #include "dhcp.h"
 #include "cmdline.h"
 #include "chilli.h"
+#include "remotectrl.h"
 
 struct options_t options;
 
@@ -127,6 +128,12 @@ static int do_sighup = 0;
 /* Forward declarations */
 int static acct_req(struct app_conn_t *conn, int status_type);
 int static config_radius();
+void admin_disconnect(struct app_conn_t *appconn, int terminateCause);
+void admin_authorize(struct app_conn_t *appconn);
+int send_acct_head( struct rmt_socket_t *client, struct app_conn_t *appconn);
+int send_Connection( struct rmt_socket_t *client, struct app_conn_t *appconn );
+int send_Acct_Setting ( struct rmt_socket_t *client, struct app_conn_t *appconn );
+int send_Accounting( struct rmt_socket_t *client, struct app_conn_t *appconn );
 
 /* Fireman catches falling childs and eliminates zombies */
 void static fireman(int signum) { 
@@ -180,19 +187,18 @@ int static leaky_bucket(struct app_conn_t *conn, int octetsup, int octetsdown) {
   struct timeval timenow;
   uint64_t timediff; /* In microseconds */
   int result = 0;
-
  
   gettimeofday(&timenow, NULL);
 
   timediff = (timenow.tv_sec - conn->last_time.tv_sec) * ((uint64_t) 1000000);
   timediff += (timenow.tv_usec - conn->last_time.tv_usec);
 
-  /*  if (options.debug) printf("Leaky bucket timediff: %lld, bucketup: %d, bucketdown: %d %d %d\n", 
-			    timediff, conn->bucketup, conn->bucketdown, 
-			    octetsup, octetsdown);*/
+/*    if (options.debug) 
+			printf("Leaky bucket timediff: %lld, bucketup: %d, bucketdown: %d %d %d\n",
+					timediff, conn->bucketup, conn->bucketdown, octetsup, octetsdown);
+*/
 
-  if (conn->bandwidthmaxup) {
-
+	if (conn->bandwidthmaxup) {
     /* Subtract what the leak since last time we visited */
     if (conn->bucketup > ((timediff * conn->bandwidthmaxup)/8000000)) {
       conn->bucketup -= (timediff * conn->bandwidthmaxup) / 8000000;
@@ -200,9 +206,9 @@ int static leaky_bucket(struct app_conn_t *conn, int octetsup, int octetsdown) {
     else {
       conn->bucketup = 0;
     }
-    
+//    printf("octetsup: %d -> conn->bucketup+octetsup: %d > conn->bucketupsize: %d \n", octetsup, conn->bucketup + octetsup, conn->bucketupsize);
     if ((conn->bucketup + octetsup) > conn->bucketupsize) {
-      /*if (options.debug) printf("Leaky bucket deleting uplink packet\n");*/
+      if (options.debug) printf("Leaky bucket deleting uplink packet\n");
       result = -1;
     }
     else {
@@ -217,9 +223,10 @@ int static leaky_bucket(struct app_conn_t *conn, int octetsup, int octetsdown) {
     else {
       conn->bucketdown = 0;
     }
+//    printf("octetsdown: %d -> conn->bucketdown+octetsdown: %d > conn->bucketdownsize: %d \n", octetsdown, conn->bucketdown + octetsdown, conn->bucketdownsize);
     
     if ((conn->bucketdown + octetsdown) > conn->bucketdownsize) {
-      /*if (options.debug) printf("Leaky bucket deleting downlink packet\n");*/
+      if (options.debug) printf("Leaky bucket deleting downlink packet\n");
       result = -1;
     }
     else {
@@ -232,6 +239,7 @@ int static leaky_bucket(struct app_conn_t *conn, int octetsup, int octetsdown) {
   return result;
 }
 #endif /* ifndef NO_LEAKY_BUCKET */
+
 
 /* Run external script */
 
@@ -534,6 +542,8 @@ int static set_macallowed(char *macallowed, int len) {
     }
   }
   free(p3);
+
+  return 0;
 }
 
 int static process_options(int argc, char **argv, int firsttime) {
@@ -548,7 +558,7 @@ int static process_options(int argc, char **argv, int firsttime) {
     return -1;
   }
 
-  if (cmdline_parser_configfile (args_info.conf_arg, &args_info, 0, 0, 0)) {
+	if (cmdline_parser_configfile (args_info.conf_arg, &args_info, 0, 0, 0)) {
     sys_err(LOG_ERR, __FILE__, __LINE__, 0,
 	    "Failed to parse configuration file: %s!", 
 	    args_info.conf_arg);
@@ -1054,7 +1064,21 @@ int static process_options(int argc, char **argv, int firsttime) {
 		       strlen(args_info.macallowed_arg[numargs]))) 
       return -1;
   }
-
+  /* remote monitor                                                    */
+  /* Defaults to net plus 1                                       */
+  if (!args_info.rmtlisten_arg)
+    options.rmtlisten.s_addr = options.uamlisten.s_addr;
+  else 
+		if (!inet_aton(args_info.rmtlisten_arg, &options.rmtlisten)){
+			sys_err(LOG_ERR, __FILE__, __LINE__, 0,
+	    "Invalid Remote monitor IP address: %s!", args_info.rmtlisten_arg);
+			return -1;
+		}
+  /* rmtport                                                      */
+  options.rmtport = args_info.rmtport_arg;
+  options.rmtpasswd = args_info.rmtpasswd_arg;
+  options.bandwidthmaxup = args_info.bandwidthmaxup_arg;
+  options.bandwidthmaxdown = args_info.bandwidthmaxdown_arg;
 
   /* foreground                                                   */
   /* If flag not given run as a daemon                            */
@@ -1093,7 +1117,6 @@ void static reprocess_options(int argc, char **argv) {
     memcpy(&options, &options2, sizeof(options));
     return;
   }
-
   /* Options which we do not allow to be affected */
   /* fg, conf and statedir are not stored in options */
   options.net = options2.net; /* net */
@@ -1120,6 +1143,13 @@ void static reprocess_options(int argc, char **argv) {
   options.lease = options2.lease; /* lease */
   options.eapolenable = options2.eapolenable; /* eapolenable */
   options.pidfile = options2.pidfile; /* pidfile */
+
+  options.rmtlisten = options2.rmtlisten; /* remote listen */
+  options.rmtport = options2.rmtport; /* remote port */
+  options.rmtpasswd = options2.rmtpasswd; /* remote password */
+
+//  options.bandwidthmaxup = options2.bandwidthmaxup; /* remote password */
+//  options.bandwidthmaxdown = options2.bandwidthmaxdown; /* remote password */
 
   /* Reinit DHCP parameters */
   (void) dhcp_set(dhcp, (options.debug & DEBUG_DHCP),
@@ -2991,7 +3021,7 @@ int cb_radius_auth_conf(struct radius_t *radius,
 
   /* Get Service Type */
   if (!radius_getattr(pack, &stateattr, RADIUS_ATTR_SERVICE_TYPE, 0, 0, 0)) {
-    if(ntohl(attr->v.i) == RADIUS_SERVICE_TYPE_CHILLISPOT_AUTHORIZE_ONLY) {
+    if(ntohl(stateattr->v.i) == RADIUS_SERVICE_TYPE_CHILLISPOT_AUTHORIZE_ONLY) {
       sys_err(LOG_ERR, __FILE__, __LINE__, 0,
 	      "Chillispot-Authorize-Only Service-Type in Access-Accept");
       return dnprot_reject(appconn);
@@ -3097,9 +3127,8 @@ int cb_radius_auth_conf(struct radius_t *radius,
       appconn->bucketupsize = BUCKET_SIZE_MIN;
 #endif
   }
-  else {
+  else
     appconn->bandwidthmaxup = 0;
-  }
   
   /* Bandwidth down */
   if (!radius_getattr(pack, &attr, RADIUS_ATTR_VENDOR_SPECIFIC,
@@ -3114,9 +3143,8 @@ int cb_radius_auth_conf(struct radius_t *radius,
       appconn->bucketdownsize = BUCKET_SIZE_MIN;
 #endif
   }
-  else {
+  else
     appconn->bandwidthmaxdown = 0;
-  }
 
 #ifdef RADIUS_ATTR_CHILLISPOT_BANDWIDTH_MAX_UP
   /* Bandwidth up */
@@ -3621,7 +3649,7 @@ int cb_dhcp_data_ind(struct dhcp_conn_t *conn, void *pack, unsigned len) {
     appconn->input_octets +=len;
 #ifndef NO_LEAKY_BUCKET
 #ifdef COUNT_UPLINK_DROP
-    if (leaky_bucket(appconn, len, 0)) return 0;
+    if (leaky_bucket(appconn, len, 0)==-1) return 0;
 #endif /* ifdef COUNT_UPLINK_DROP */
 #endif /* ifndef NO_LEAKY_BUCKET */
   }
@@ -3887,6 +3915,10 @@ int main(int argc, char **argv)
   struct sigaction act;
   struct itimerval itval;
 
+	struct rmt_socket_t srv;
+	struct rmt_socket_t client[MAX_CLIENTS];
+	int activeClients = 0;			/* Número clientes conectados */
+
   /* open a connection to the syslog daemon */
   /*openlog(PACKAGE, LOG_PID, LOG_DAEMON);*/
   openlog(PACKAGE, (LOG_PID | LOG_PERROR), LOG_DAEMON);
@@ -4044,12 +4076,16 @@ int main(int argc, char **argv)
   if (options.debug) 
     printf("Waiting for client request...\n");
 
+	
+	srv = rmtctrl_initSrv(options.rmtlisten, options.rmtport);
 
   /******************************************************************/
   /* Main select loop                                               */
   /******************************************************************/
 
   while (keep_going) {
+
+		rmtctrl_srv(srv,client,&activeClients);
 
     if (do_timeouts) {
       /*if (options.debug) printf("Do timeouts!\n");*/
@@ -4175,4 +4211,488 @@ int main(int argc, char **argv)
 
   return 0;
   
+}
+
+void rmtctrl_msg_proccess(struct rmt_socket_t *client)
+{
+	msg_head_t header;
+	char *msg=NULL;
+	char *reg=NULL;
+	struct app_conn_t *appconn;
+	struct dhcp_conn_t *dhcpconn;
+	char str[2048];
+	int found=0;
+	int rslt=0;
+	int n;
+	uint64_t l;
+	rslt = rmtctrl_read_msg(client,&header,&msg);
+	if (rslt > 0)
+	{
+		switch (header.id)
+		{
+			case QRY_CONNECTED_LIST:
+				rslt += send_srvData(client);
+				rslt += rmtctrl_write_msg(client,MSG_START,0, "\n" );
+				rslt += rmtctrl_write_msg(client,MSG_PART,0, "Ord ---------- User Name ----------- -- MAC Address -- -- IP Address - -- Input - - Output - Sta\n" );
+				for (n=0; n<APP_NUM_CONN; n++) {
+					appconn = &connection[n];
+					if ((appconn->inuse != 0)){
+						dhcpconn = (struct dhcp_conn_t*) appconn->dnlink;
+						found++;
+						l = found;
+						rslt += send_number(client, MSG_PART, 0, "%3s ", l);
+						rslt += send_line(client,MSG_PART,0, "%-32s ",appconn->proxyuser);
+						rslt += send_mac(client,MSG_PART,0, "%17s ",appconn->hismac);
+						rslt += send_line(client,MSG_PART,0, "%15s ",inet_ntoa(appconn->hisip));
+						rslt += send_number(client,MSG_PART,0, "%10s ",appconn->input_octets);
+						rslt += send_number(client,MSG_PART,0, "%10s ",appconn->output_octets);
+						rslt += send_number(client, MSG_PART, 0, " %s ",appconn->authenticated);
+						rslt += send_number(client, MSG_PART, 0, " %s \n",dhcpconn->authstate);
+					}
+				}
+				rslt += send_number(client,MSG_END,found, "Total of connected device(s) %s\n",found);
+			break;
+			case QRY_CONNECTED_FULL_LIST:
+				rslt += send_srvData(client);
+				rslt += rmtctrl_write_msg(client,MSG_START,0, "\n" );
+				for (n=0; n<APP_NUM_CONN; n++) {
+					appconn = &connection[n];
+					if ((appconn->inuse != 0)){
+						found++;
+						l = found;
+						rslt += send_number(client, MSG_PART, 0, "Connection : %s\n{\n", l);
+						rslt += send_acct_head( client, appconn);
+						rslt += send_line(client, MSG_PART, 0, "%s\n", "}");
+					}
+				}
+				rslt += send_number(client, MSG_END, found, "Total of connected device(s) %s\n",found);
+			break;
+			case QRY_STATUS:
+				///
+				rslt += send_Status(client, appconn);
+			break;
+			case CMD_AUTHORIZE:
+				for (n=0; n<APP_NUM_CONN; n++)
+				{
+					l = 0;
+					appconn = &connection[n];
+					if ((appconn->inuse != 0) && (appconn->authenticated == 0))
+					{
+						switch (header.extra)
+						{
+							case EXTRA_MAC_OP:
+								if ( strcmp(msg,mac2str(appconn->hismac)) == 0)
+								{
+									found++;
+									l=1;
+									break;
+								}
+							break;
+							case EXTRA_IP_OP:
+								if ( strcmp(msg,inet_ntoa(appconn->hisip)) == 0)
+								{
+									found++;
+									l=1;
+									break;
+								}
+							break;
+							case EXTRA_USER_OP:
+								if ( strcmp(msg,appconn->proxyuser) == 0)
+								{
+									found++;
+									l=1;
+									break;
+								}
+							break;
+							default:
+								found++;
+								l=1;
+							break;
+						}
+						if ( l == 1 ){
+							admin_authorize(appconn);
+							rslt += send_srvData( client );
+							rslt += rmtctrl_write_msg(client,MSG_PART,0, " \n" );
+							rslt += send_acct_head( client, appconn);
+							sys_err(LOG_NOTICE, __FILE__, __LINE__, 0,
+								"Admin Authorize MAC=%s IP=%s",
+								mac2str(appconn->hismac), inet_ntoa(appconn->hisip));
+						}
+					}
+				}
+				if (found == 0)
+					rslt += rmtctrl_write_msg(client,MSG_END,0, "Not device found to Authorze\n" );
+				else 
+				{
+					rslt += send_number(client, MSG_END, found, "Autorized %s device(s)\n",found);
+				}
+			break;
+			case CMD_DISCONNECT:
+				for (n=0; n<APP_NUM_CONN; n++)
+				{
+					l = 0;
+					appconn = &connection[n];
+					if ((appconn->inuse != 0) && (appconn->authenticated == 1))
+					{
+						if (dhcpconn = (struct dhcp_conn_t*) appconn->dnlink) {
+							switch (header.extra)
+							{
+								case EXTRA_MAC_OP:
+									if ( strcmp(msg,mac2str(appconn->hismac)) == 0)
+									{
+										found++;
+										l=1;
+										break;
+									}
+								break;
+								case EXTRA_IP_OP:
+									if ( strcmp(msg,inet_ntoa(appconn->hisip)) == 0)
+									{
+										found++;
+										l=1;
+										break;
+									}
+								break;
+								case EXTRA_USER_OP:
+									if ( strcmp(msg,appconn->proxyuser) == 0)
+									{
+										found++;
+										l=1;
+										break;
+									}
+								break;
+								default:
+									found++;
+									l=1;
+								break;
+							}
+							if ( l == 1 ) {
+								rslt += send_srvData( client );
+								rslt += rmtctrl_write_msg(client,MSG_PART,0, " \n" );
+								rslt += send_acct_head( client, appconn);
+								admin_disconnect(appconn, RADIUS_TERMINATE_CAUSE_ADMIN_RESET);
+								sys_err(LOG_NOTICE, __FILE__, __LINE__, 0,
+									"Admin Disconnect username=%s IP=%s",
+									appconn->user, inet_ntoa(appconn->hisip));
+							}
+						}
+					}
+				}
+				if (found == 0)
+					rslt += rmtctrl_write_msg(client,MSG_END,0, "Not decice found to Disconnect\n" );
+				else 
+				{
+					rslt += send_number(client, MSG_END, found, "Disconnect %s device(s)\n",found);
+				}
+			break;
+			default:
+					rslt += rmtctrl_write_msg(client,MSG_END,0, "Unknow command.\n" );
+			break;
+		}
+	}
+	else
+	{
+		printf("Desde %s se recibieron %d bytes y se enviaron %d bytes\n",inet_ntoa(client->addr.sin_addr),client->Rx,client->Tx);
+		close(client->fd); /* cierra fd_rmt_client */
+		printf("Client cerro conexión desde %s\n",inet_ntoa(client->addr.sin_addr) ); 
+		client->fd = -1;
+	}
+	if(msg)
+		free(msg);
+}
+
+void admin_authorize(struct app_conn_t *appconn)
+{
+  struct radius_packet_t radius_pack;
+	strcpy(appconn->user,"Admin-Authorize");
+	strcpy(appconn->proxyuser,"Admin-Authorize");
+	appconn->proxyuserlen = strlen(appconn->proxyuser);
+	appconn->interim_interval = 600;
+	appconn->terminate_cause = 0;
+	appconn->idletimeout = 300;
+
+	radius_default_pack(radius, &radius_pack, RADIUS_CODE_ACCESS_REQUEST);
+  radius_pack.code = RADIUS_CODE_ACCESS_REQUEST;
+//  (void) radius_addattr(radius, &radius_pack, RADIUS_ATTR_USER_NAME, 0, 0, 0,
+//			(uint8_t*) appconn->proxyuser, appconn->proxyuserlen);
+
+	if ( options.bandwidthmaxup > 0 ){
+		appconn->bandwidthmaxup = options.bandwidthmaxup * 1024;
+    appconn->bucketupsize = BUCKET_TIME * appconn->bandwidthmaxup / 8000;
+    if (appconn->bucketupsize < BUCKET_SIZE_MIN) 
+      appconn->bucketupsize = BUCKET_SIZE_MIN;
+	}
+	if ( options.bandwidthmaxdown > 0 ){
+		appconn->bandwidthmaxdown = options.bandwidthmaxdown * 1024;
+    appconn->bucketdownsize = BUCKET_TIME * appconn->bandwidthmaxdown / 8000;
+    if (appconn->bucketdownsize < BUCKET_SIZE_MIN) 
+      appconn->bucketdownsize = BUCKET_SIZE_MIN;
+	}
+	dnprot_accept(appconn);
+}
+
+void admin_disconnect(struct app_conn_t *appconn, int terminateCause)
+{
+	dnprot_terminate(appconn);
+	(void) acct_req(appconn, RADIUS_STATUS_TYPE_STOP);
+	set_sessionid(appconn);
+}
+
+int send_acct_head( struct rmt_socket_t *client, struct app_conn_t *appconn)
+{
+	int rslt;
+	rslt += send_Connection( client, appconn );
+	rslt += send_Acct_Setting( client, appconn );
+	rslt += send_Accounting( client, appconn );
+	return rslt;
+}
+
+int send_Connection( struct rmt_socket_t *client, struct app_conn_t *appconn )
+{
+	int rslt;
+	uint64_t l;
+	rslt += send_line(client, MSG_PART, 0, "\tSession-Id = %s\n",appconn->sessionid);
+	rslt += send_line(client, MSG_PART, 0, "\tUser-Name = %s\n",appconn->user);
+//	rslt = send_line(client, MSG_PART, 0, "\tnasip=%s\n",appconn->nasip);
+	rslt += send_mac(client, MSG_PART, 0, "\tClient-Mac-Address = %s\n",appconn->hismac);
+	rslt += send_mac(client, MSG_PART, 0, "\tNas-Mac-Address = %s\n",appconn->ourmac);
+//	rslt += send_line(client, MSG_PART, 0, "\tourip=%s\n",inet_ntoa(appconn->ourip));
+	rslt += send_line(client, MSG_PART, 0, "\tClient-Ip = %s\n",inet_ntoa(appconn->hisip));
+	rslt += send_line(client, MSG_PART, 0, "\tClient-Require-Ip = %s\n",inet_ntoa(appconn->reqip));
+	rslt += send_number(client, MSG_PART, 0, "\tAutheticated = %s\n",appconn->authenticated);
+	l = appconn->uamtime;
+	if (l > 0)
+		rslt += send_number(client, MSG_PART, 0, "\tUAM-Time = %s\n",l);
+	if (strlen(appconn->userurl)>0)
+		rslt = send_line(client, MSG_PART, 0, "\tUser-URL = %s\n",appconn->userurl);
+	return rslt;
+}
+
+int send_Acct_Setting ( struct rmt_socket_t *client, struct app_conn_t *appconn )
+{
+	int rslt = 0;
+	uint64_t l;
+	if (appconn->authenticated == 0 ) return 0;
+	/* Account Settings */
+	l = appconn->sessionterminatetime;
+	if (l > 0)
+		rslt += send_number(client, MSG_PART, 0, "\tSession-Terminate-Time = %s\n",l);
+	l = appconn->sessiontimeout;
+	if (l > 0)
+		rslt += send_number(client, MSG_PART, 0, "\tSession-Timeout = %s\n",l);
+	l = appconn->idletimeout;
+	if (l > 0)
+		rslt += send_number(client, MSG_PART, 0, "\tIdle-Timeout = %s\n",l);
+	l = appconn->bandwidthmaxup;
+	if (l > 0)
+		rslt += send_number(client, MSG_PART, 0, "\tBandwidth-Max-Up = %s\n",l);
+	l = appconn->bandwidthmaxdown;
+	if (l > 0)
+		rslt += send_number(client, MSG_PART, 0, "\tBandwidth-Max-Down = %s\n",l);
+	l = appconn->maxinputoctets;
+	if (l > 0)
+		rslt += send_number(client, MSG_PART, 0, "\tMax-Input-Octets = %s\n",l);
+	l = appconn->maxoutputoctets;
+	if (l > 0)
+		rslt += send_number(client, MSG_PART, 0, "\tMax-Output-Octets = %s\n",l);
+	l = appconn->maxtotaloctets;
+	if (l > 0)
+		rslt += send_number(client, MSG_PART, 0, "\tMax-Total-Octets = %s\n",l);
+	return rslt;
+}
+
+int send_Accounting( struct rmt_socket_t *client, struct app_conn_t *appconn )
+{
+	if (appconn->authenticated == 0 ) return 0;
+	int rslt = 0;
+	uint64_t l;
+	l = appconn->start_time.tv_sec;
+	if (l > 0)
+		rslt += send_number(client, MSG_PART, 0, "\tStart-Time = %s\n",l);
+	l = appconn->interim_time.tv_sec;
+	if (l > 0)
+		rslt += send_number(client, MSG_PART, 0, "\tInterim-Time = %s\n",l);
+	l = appconn->interim_interval;
+	if (l > 0)
+		rslt += send_number(client, MSG_PART, 0, "\tInterim-Interval = %s\n",l);
+	l = appconn->last_time.tv_sec;
+	if (l > 0)
+		rslt += send_number(client, MSG_PART, 0, "\tLast-Time = %s\n",l);
+	l = appconn->input_packets;
+	if (l > 0)
+		rslt += send_number(client, MSG_PART, 0, "\tInput-Packets = %s\n",l);
+	l = appconn->output_packets;
+	if (l > 0)
+		rslt += send_number(client, MSG_PART, 0, "\tOutput-Packets = %s\n",l);
+	l = appconn->input_octets;
+	if (l > 0)
+		rslt += send_number(client, MSG_PART, 0, "\tInput-Octets = %s\n",l);
+	l = appconn->output_octets;
+	if (l > 0)
+		rslt += send_number(client, MSG_PART, 0, "\tOutput-Octets = %s\n",l);
+	l = appconn->terminate_cause;
+	if (l > 0)
+		rslt += send_number(client, MSG_PART, 0, "\tTerminate-Cause = %s\n",l);
+	l = appconn->bucketup;
+	if (l > 0)
+		rslt += send_number(client, MSG_PART, 0, "\tBucket-Up = %s\n",l);
+	l = appconn->bucketdown;
+	if (l > 0)
+		rslt += send_number(client, MSG_PART, 0, "\tBucket-Down = %s\n",l);
+	l = appconn->bucketupsize;
+	if (l > 0)
+		rslt += send_number(client, MSG_PART, 0, "\tBucket-Up-Size = %s\n",l);
+	l = appconn->bucketdownsize;
+	if (l > 0)
+		rslt += send_number(client, MSG_PART, 0, "\tBucket-Down-Size = %s\n",l);
+	return rslt;
+}
+
+int send_srvData( struct rmt_socket_t *client)
+{
+	int rslt=0;
+	rslt += send_line(client, MSG_PART, 0, "%s\n",options.radiusnasid);
+	if (options.radiuslocationid)
+		rslt += send_line(client, MSG_PART, 0, "\tLOCATION ID:%s\n",options.radiuslocationid);
+	if (options.radiuslocationname)
+		rslt += send_line(client, MSG_PART, 0, "\tLOCATION NAME:%s\n",options.radiuslocationname);
+//	rslt += send_line(client, MSG_PART, 0, "\tDEVICE: %s ",tun->devname);
+//	rslt += send_line(client, MSG_PART, 0, "INTERFACE: %s\n",options.dhcpif);
+//	rslt += send_line(client, MSG_PART, 0, "\tIP ADDR: %s ",inet_ntoa(options.dhcplisten));
+//	rslt += send_line(client, MSG_PART, 0, "NETWORK: %s ",inet_ntoa(options.net));
+//	rslt += send_line(client, MSG_PART, 0, "MASK: %s\n",inet_ntoa(options.mask));
+	if (options.dns1.s_addr)
+		rslt += send_line(client, MSG_PART, 0, "\tDNS SERVERS: %s - ",inet_ntoa(options.dns1));
+	if (options.dns2.s_addr)
+		rslt += send_line(client, MSG_PART, 0, "%s\n",inet_ntoa(options.dns2));
+	rslt += send_line(client, MSG_PART, 0, "\tRADIUS SERVERS: %s - ",inet_ntoa(options.radiusserver1));
+	rslt += send_line(client, MSG_PART, 0, "%s\n",inet_ntoa(options.radiusserver2));
+	return rslt;
+}
+
+int send_Status( struct rmt_socket_t *client, struct app_conn_t *appconn )
+{
+	int rslt = 0;
+	int n;
+	uint64_t l;
+	l = options.debug;
+	rslt += send_number(client, MSG_PART, 0, "\tdebug=%s\n",l);
+	/* conf */
+	l = options.interval;
+	rslt += send_number(client, MSG_PART, 0, "\tinterval=%s\n",l);
+	rslt += send_line(client, MSG_PART, 0, "\tpidfile=%s\n",options.pidfile);
+	/* TUN parameters */
+	rslt += send_line(client, MSG_PART, 0, "\tnet=%s\n",inet_ntoa(options.net)); /* Network IP address */
+	rslt += send_line(client, MSG_PART, 0, "\tmask=%s\n",inet_ntoa(options.mask)); /* Network mask */
+	rslt += send_line(client, MSG_PART, 0, "\tnetc=%s\n",options.netc);
+	rslt += send_line(client, MSG_PART, 0, "\tmaskc=%s\n",options.maskc);
+	l = options.allowdyn;
+	rslt += send_number(client, MSG_PART, 0, "\tallowdyn=%s\n",l); /* Allow dynamic address allocation */
+	rslt += send_line(client, MSG_PART, 0, "\tdynip=%s\n",options.dynip); /* Dynamic IP address pool */
+
+	l = options.allowstat;
+	rslt += send_number(client, MSG_PART, 0, "\tallowstat=%s\n",l); /* Allow static address allocation */
+	rslt += send_line(client, MSG_PART, 0, "\tstatip=%s\n",options.statip); /* Static IP address pool */
+
+	rslt += send_line(client, MSG_PART, 0, "\tdns1=%s\n",inet_ntoa(options.dns1)); /* Primary DNS server IP address */
+	rslt += send_line(client, MSG_PART, 0, "\tdns2=%s\n",inet_ntoa(options.dns2)); /* Secondary DNS server IP address */
+	rslt += send_line(client, MSG_PART, 0, "\tdomain=%s\n",options.domain); /* Domain to use for DNS lookups */
+	rslt += send_line(client, MSG_PART, 0, "\tipup=%s\n",options.ipup); /* Script to run after link-up */
+	rslt += send_line(client, MSG_PART, 0, "\tipdown=%s\n",options.ipdown); /* Script to run after link-down */
+	rslt += send_line(client, MSG_PART, 0, "\tconup=%s\n",options.conup); /* Script to run after user logon */
+	rslt += send_line(client, MSG_PART, 0, "\tcondown=%s\n",options.condown); /* Script to run after user logoff */
+	/* Radius parameters */
+	rslt += send_line(client, MSG_PART, 0, "\tradiuslisten=%s\n",inet_ntoa(options.radiuslisten)); /* IP address to listen to */
+	rslt += send_line(client, MSG_PART, 0, "\tradiusserver1=%s\n",inet_ntoa(options.radiusserver1)); /* IP address of radius server 1 */
+	rslt += send_line(client, MSG_PART, 0, "\tradiusserver2=%s\n",inet_ntoa(options.radiusserver2)); /* IP address of radius server 2 */
+	l = options.radiusauthport;
+	rslt += send_number(client, MSG_PART, 0, "\tradiusauthport=%s\n",l); /* Authentication UDP port */
+	l = options.radiusacctport;
+	rslt += send_number(client, MSG_PART, 0, "\tradiusacctport=%s\n",l); /* Accounting UDP port */
+	rslt += send_line(client, MSG_PART, 0, "\tradiussecret=%s\n",options.radiussecret); /* Radius shared secret */
+	rslt += send_line(client, MSG_PART, 0, "\tradiusnasid=%s\n",options.radiusnasid); /* Radius NAS-Identifier */
+	rslt += send_line(client, MSG_PART, 0, "\tradiuscalled=%s\n",options.radiuscalled); /* Radius Called-Station-ID */
+	rslt += send_line(client, MSG_PART, 0, "\tradiusnasip=%s\n",inet_ntoa(options.radiusnasip)); /* Radius NAS-IP-Address */
+	rslt += send_line(client, MSG_PART, 0, "\tradiuslocationid=%s\n",options.radiuslocationid); /* WISPr location ID */
+	rslt += send_line(client, MSG_PART, 0, "\tradiuslocationname=%s\n",options.radiuslocationname); /* WISPr location name */
+	l = options.radiusnasporttype;
+	rslt += send_number(client, MSG_PART, 0, "\tradiusnasporttype=%s\n",l); /* NAS-Port-Type */
+	l = options.coaport;
+	rslt += send_number(client, MSG_PART, 0, "\tcoaport=%s\n",l); /* UDP port to listen to */
+	l = options.coanoipcheck;
+	rslt += send_number(client, MSG_PART, 0, "\tcoaipcheck=%s\n",l); /* Allow disconnect from any IP */
+	/* Radius proxy parameters */
+	rslt += send_line(client, MSG_PART, 0, "\tproxylisten=%s\n",inet_ntoa(options.proxylisten)); /* IP address to listen to */
+	l = options.proxyport;
+	rslt += send_number(client, MSG_PART, 0, "\tproxyport=%s\n",l); /* UDP port to listen to */
+	rslt += send_line(client, MSG_PART, 0, "\tproxyaddr=%s\n",inet_ntoa(options.proxyaddr)); /* IP address of proxy client(s) */
+	rslt += send_line(client, MSG_PART, 0, "\tproxymask=%s\n",inet_ntoa(options.proxymask)); /* IP mask of proxy client(s) */
+	rslt += send_line(client, MSG_PART, 0, "\tproxysecret=%s\n",options.proxysecret); /* Proxy shared secret */
+	/* Radius configuration management parameters */
+	rslt += send_line(client, MSG_PART, 0, "\tconfusername=%s\n",options.confusername); /* Username for remote config */
+	rslt += send_line(client, MSG_PART, 0, "\tconfpassword=%s\n",options.confpassword); /* Password for remote config */
+	/* DHCP parameters */
+	l = options.nodhcp;
+	rslt += send_number(client, MSG_PART, 0, "\tnodhcp=%s\n",l); /* Do not use DHCP */
+	rslt += send_line(client, MSG_PART, 0, "\tdhcpif=%s\n",options.dhcpif); /* Interface: eth0 */
+	rslt += send_mac(client, MSG_PART, 0, "\tdhcpmac=%s\n",options.dhcpmac); /* Interface MAC address */
+	l = options.dhcpusemac;
+	rslt += send_number(client, MSG_PART, 0, "\tdhcpusemac=%s\n",l); /* Use given MAC or interface default */
+	rslt += send_line(client, MSG_PART, 0, "\tdhcplisten=%s\n",inet_ntoa(options.dhcplisten)); /* IP address to listen to */
+	l = options.lease;
+	rslt += send_number(client, MSG_PART, 0, "\tlease=%s\n",l); /* DHCP lease time */
+	/* EAPOL parameters */
+	l = options.eapolenable;
+	rslt += send_number(client, MSG_PART, 0, "\teapolenable=%s\n",l); /* Use eapol */
+	/* UAM parameters */
+	l = options.uamserverlen;
+	rslt += send_number(client, MSG_PART, 0, "\tuamserverlen=%s\n",l); /* Number of UAM servers */
+	for (n = 0; n < options.uamserverlen; n++){
+		rslt += send_number(client, MSG_PART, 0, "\tuamokip[%s]=",n);
+		rslt += send_line(client, MSG_PART, 0, "%s\n",inet_ntoa(options.uamserver[n])); /* IP address of UAM server */
+	}
+	l = options.uamserverport;
+	rslt += send_number(client, MSG_PART, 0, "\tuamserverport=%s\n",l); /* Port of UAM server */
+	rslt += send_line(client, MSG_PART, 0, "\tuamsecret=%s\n",options.uamsecret); /* Shared secret */
+	rslt += send_line(client, MSG_PART, 0, "\tuamurl=%s\n",options.uamurl); /* URL of authentication server */
+	rslt += send_line(client, MSG_PART, 0, "\tuamhomepage=%s\n",options.uamhomepage); /* URL of redirection homepage */
+	l = options.uamhomepageport;
+	rslt += send_number(client, MSG_PART, 0, "\tuamhomepageport=%s\n",l); /* Port of redirection homepage */
+	rslt += send_line(client, MSG_PART, 0, "\tuamlisten=%s\n",inet_ntoa(options.uamlisten)); /* IP address of local authentication */
+	l = options.uamport;
+	rslt += send_number(client, MSG_PART, 0, "\tuamport=%s\n",l); /* TCP port to listen to */
+	l = options.uamokiplen;
+	rslt += send_number(client, MSG_PART, 0, "\tuamokiplen=%s\n",l); /* Number of allowed IP addresses */
+	for (n=0; n < options.uamokiplen; n++){
+		rslt += send_number(client, MSG_PART, 0, "\tuamokip[%s]=",n);
+		rslt = send_line(client, MSG_PART, 0, "%s\n",inet_ntoa(options.uamokip[n])); /* List of allowed IP addresses */
+	}
+	l = options.uamoknetlen;
+	rslt += send_number(client, MSG_PART, 0, "\tuamoknetlen=%s\n",l); /* Number of networks */
+	for (n=0; n < options.uamoknetlen; n++){
+		rslt += send_number(client, MSG_PART, 0, "\tuamoknet[%s]=",n);
+		rslt += send_line(client, MSG_PART, 0, "%s/",inet_ntoa(options.uamokaddr[n])); /* List of allowed network IP */
+		rslt += send_line(client, MSG_PART, 0, "%s\n",inet_ntoa(options.uamokmask[n])); /* List of allowed network mask */
+	}
+	l = options.uamanydns;
+	rslt += send_number(client, MSG_PART, 0, "\tuamanydns=%s\n",l); /* Allow client to use any DNS server */
+	/* MAC Authentication */
+	l = options.macauth;
+	rslt += send_number(client, MSG_PART, 0, "\tmacauth=%s\n",l); /* Use MAC authentication */
+	l = options.macoklen; 
+	rslt += send_number(client, MSG_PART, 0, "\tmacoklen=%s\n",l); /* Number of MAC addresses */
+	for (n=0; n < options.macoklen; n++){
+		rslt += send_number(client, MSG_PART, 0, "\tmacok[%s]=",n);
+		rslt += send_mac(client, MSG_PART, 0, "\%s\n",options.macok[n]); /* Allowed MACs */
+	}
+	rslt += send_line(client, MSG_PART, 0, "\tmacsuffix=%s\n",options.macsuffix);
+	rslt += send_line(client, MSG_PART, 0, "\tmacpasswd=%s\n",options.macpasswd);
+
+	rslt += send_line(client, MSG_PART, 0, "\trmtlisten=%s\n",inet_ntoa(options.rmtlisten));
+	l = options.rmtport; 
+	rslt += send_number(client, MSG_PART, 0, "\trmtport=%s\n",l); /* Number of MAC addresses */
+	rslt += send_line(client, MSG_PART, 0, "\trmtpasswd=%s\n",options.rmtpasswd);
+	rslt += send_number(client, MSG_PART, 0, "\tbandwidthmaxup=%s\n",options.bandwidthmaxup);
+	rslt += send_number(client, MSG_PART, 0, "\tbandwidthmaxdown=%s\n",options.bandwidthmaxdown);
+	rslt += rmtctrl_write_msg(client,MSG_END,0, "End of configuration\n");
 }

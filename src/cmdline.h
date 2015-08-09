@@ -122,6 +122,17 @@ struct gengetopt_args_info
   char * macsuffix_orig;	/* Suffix to add to the MAC address original value given at command line.  */
   char * macpasswd_arg;	/* Password used when performing MAC authentication (default='password').  */
   char * macpasswd_orig;	/* Password used when performing MAC authentication original value given at command line.  */
+  int rmtport_arg;	/* TCP port to bind to for remote monitor and config (default='3991').  */
+  char * rmtport_orig;	/* TCP port to bind to for remote monitor and config original value given at command line.  */
+  char * rmtlisten_arg;	/* IP address to listen to for remote monitor and config.  */
+  char * rmtlisten_orig;	/* IP address to listen to for remote monitor and config original value given at command line.  */
+  char * rmtpasswd_arg;	/* Password for remote monitor and config.  */
+  char * rmtpasswd_orig;	/* Password for remote monitor and config original value given at command line.  */
+  int bandwidthmaxup_arg;	/* Default Bandwidth Max Up.  */
+  char *bandwidthmaxup_orig;	/* Default Bandwidth Max Up value given at command line.  */
+  int bandwidthmaxdown_arg;	/* Default Bandwidth Max Down.  */
+  char *bandwidthmaxdown_orig;	/* Default Bandwidth Max Down value given at command line.  */
+
   
   int help_given ;	/* Whether help was given.  */
   int version_given ;	/* Whether version was given.  */
@@ -177,7 +188,11 @@ struct gengetopt_args_info
   unsigned int macallowed_given ;	/* Whether macallowed was given.  */
   int macsuffix_given ;	/* Whether macsuffix was given.  */
   int macpasswd_given ;	/* Whether macpasswd was given.  */
-
+  int rmtport_given ;	/* Whether uamport was given.  */
+  int rmtlisten_given ;	/* Whether uamlisten was given.  */
+  int rmtpasswd_given ;	/* Whether confpassword was given.  */
+	int bandwidthmaxup_given ;
+	int bandwidthmaxdown_given ;
 } ;
 
 int cmdline_parser (int argc, char * const *argv, struct gengetopt_args_info *args_info);

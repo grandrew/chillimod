@@ -113,6 +113,11 @@ void clear_given (struct gengetopt_args_info *args_info)
   args_info->macallowed_given = 0 ;
   args_info->macsuffix_given = 0 ;
   args_info->macpasswd_given = 0 ;
+  args_info->rmtlisten_given = 0 ;
+  args_info->rmtport_given = 0 ;
+  args_info->rmtpasswd_given = 0 ;
+  args_info->bandwidthmaxup_given = 0 ;
+  args_info->bandwidthmaxdown_given = 0 ;
 }
 
 static
@@ -216,7 +221,19 @@ void clear_args (struct gengetopt_args_info *args_info)
   args_info->macsuffix_orig = NULL;
   args_info->macpasswd_arg = gengetopt_strdup ("password");
   args_info->macpasswd_orig = NULL;
-  
+  args_info->rmtport_arg = 3991;
+  args_info->rmtport_orig = NULL;
+  args_info->rmtlisten_arg = gengetopt_strdup("127.0.0.1");
+	args_info->rmtlisten_orig = NULL;
+  args_info->rmtport_orig = NULL;
+  args_info->rmtpasswd_arg = NULL;
+  args_info->rmtpasswd_orig = NULL;
+
+  args_info->bandwidthmaxup_arg = 0;
+  args_info->bandwidthmaxup_orig = NULL;
+  args_info->bandwidthmaxdown_arg = 0;
+  args_info->bandwidthmaxdown_orig = NULL;
+	
 }
 
 void
@@ -284,7 +301,12 @@ cmdline_parser_print_help (void)
   printf("%s\n","      --macauth                 Authenticate based on MAC address  \n                                  (default=off)");
   printf("%s\n","      --macallowed=STRING       List of allowed MAC addresses");
   printf("%s\n","      --macsuffix=STRING        Suffix to add to the MAC address");
-  printf("%s\n","      --macpasswd=STRING        Password used when performing MAC \n                                  authentication  (default=`password')");
+  printf("%s\n","      --macpasswd=STRING        Password used when performing MAC       \n                                  authentication  (default='password')");
+  printf("%s\n","      --rmtlisten=STRING        IP address to listen to for monitor and \n                                  configuration (default=`127.0.0.1')");
+  printf("%s\n","      --rmtport=INT             TCP port to bind to for monitor and     \n                                  configuration (default=`3991')");
+  printf("%s\n","      --rmtpasswd=STRING        Password used for remote monitor and    \n                                  configuration\n");
+  printf("%s\n","      --bandwidthmaxup=INT      Deafaul Max Up Setting in Kilobits\n");
+  printf("%s\n","      --bandwidthmaxdown=INT    Deafaul Max Down Setting in Kilobits\n");
   
 }
 
@@ -675,6 +697,11 @@ cmdline_parser_release (struct gengetopt_args_info *args_info)
       free (args_info->uamport_orig); /* free previous argument */
       args_info->uamport_orig = 0;
     }
+  if (args_info->macpasswd_orig)
+    {
+      free (args_info->macpasswd_orig); /* free previous argument */
+      args_info->macpasswd_orig = 0;
+    }
   if (args_info->uamallowed_arg)
     {
       for (i = 0; i < args_info->uamallowed_given; ++i)
@@ -738,6 +765,34 @@ cmdline_parser_release (struct gengetopt_args_info *args_info)
     {
       free (args_info->macpasswd_orig); /* free previous argument */
       args_info->macpasswd_orig = 0;
+    }
+  if (args_info->rmtlisten_orig)
+    {
+      free (args_info->rmtlisten_orig); /* free previous argument */
+      args_info->rmtlisten_orig = 0;
+    }
+  if (args_info->rmtport_orig)
+    {
+      free (args_info->rmtport_orig); /* free previous argument */
+      args_info->rmtport_orig = 0;
+    }
+
+  if (args_info->rmtpasswd_orig)
+    {
+      free (args_info->rmtpasswd_orig); // free previous argument 
+      args_info->rmtpasswd_orig = 0;
+    }
+  
+  if (args_info->bandwidthmaxup_orig)
+    {
+      free (args_info->bandwidthmaxup_orig); // free previous argument 
+      args_info->bandwidthmaxup_orig = 0;
+    }
+  
+  if (args_info->bandwidthmaxdown_orig)
+    {
+      free (args_info->bandwidthmaxdown_orig); // free previous argument 
+      args_info->bandwidthmaxdown_orig = 0;
     }
   
   clear_given (args_info);
@@ -1109,7 +1164,41 @@ cmdline_parser_file_save(const char *filename, struct gengetopt_args_info *args_
       fprintf(outfile, "%s\n", "macpasswd");
     }
   }
-  
+  if (args_info->rmtlisten_given) {
+    if (args_info->rmtlisten_orig) {
+      fprintf(outfile, "%s=\"%s\"\n", "rmtlisten", args_info->rmtlisten_orig);
+    } else {
+      fprintf(outfile, "%s\n", "rmtlisten");
+    }
+  }
+  if (args_info->rmtport_given) {
+    if (args_info->rmtport_orig) {
+      fprintf(outfile, "%s=\"%s\"\n", "rmtport", args_info->rmtport_orig);
+    } else {
+      fprintf(outfile, "%s\n", "rmtport");
+    }
+  }
+  if (args_info->rmtpasswd_given) {
+    if (args_info->rmtpasswd_orig) {
+      fprintf(outfile, "%s=\"%s\"\n", "rmtpasswd", args_info->rmtpasswd_orig);
+    } else {
+      fprintf(outfile, "%s\n", "rmtpasswd");
+    }
+  }
+  if (args_info->bandwidthmaxup_given) {
+    if (args_info->bandwidthmaxup_orig) {
+      fprintf(outfile, "%s=\"%s\"\n", "bandwidthmaxup", args_info->bandwidthmaxup_orig);
+    } else {
+      fprintf(outfile, "%s\n", "bandwidthmaxup");
+    }
+  }
+  if (args_info->bandwidthmaxdown_given) {
+    if (args_info->bandwidthmaxdown_orig) {
+      fprintf(outfile, "%s=\"%s\"\n", "bandwidthmaxdown", args_info->bandwidthmaxdown_orig);
+    } else {
+      fprintf(outfile, "%s\n", "bandwidthmaxdown");
+    }
+  }
   fclose (outfile);
 
   i = EXIT_SUCCESS;
@@ -1221,6 +1310,7 @@ cmdline_parser_internal (int argc, char * const *argv, struct gengetopt_args_inf
 {
   int c;	/* Character of the parsed option.  */
   char *multi_token, *multi_next; /* for multiple options */
+	char quehace[100];
 
   int i;        /* Counter */
 
@@ -1299,6 +1389,11 @@ cmdline_parser_internal (int argc, char * const *argv, struct gengetopt_args_inf
         { "macallowed",	1, NULL, 0 },
         { "macsuffix",	1, NULL, 0 },
         { "macpasswd",	1, NULL, 0 },
+        { "rmtport",	1, NULL, 0 },
+        { "rmtlisten",	1, NULL, 0 },
+        { "rmtpasswd",	1, NULL, 0 },
+        { "bandwidthmaxup",	1, NULL, 0 },
+        { "bandwidthmaxdown",	1, NULL, 0 },
         { NULL,	0, NULL, 0 }
       };
 
@@ -1380,8 +1475,6 @@ cmdline_parser_internal (int argc, char * const *argv, struct gengetopt_args_inf
             free (args_info->net_orig); /* free previous string */
           args_info->net_orig = gengetopt_strdup (optarg);
           break;
-
-
         case 0:	/* Long option with no short option */
           /* Which modules to print debug messages for.  */
           if (strcmp (long_options[option_index].name, "debugfacility") == 0)
@@ -2273,7 +2366,93 @@ cmdline_parser_internal (int argc, char * const *argv, struct gengetopt_args_inf
               free (args_info->macpasswd_orig); /* free previous string */
             args_info->macpasswd_orig = gengetopt_strdup (optarg);
           }
-          
+          /* IP address to listen to for remote monitor and config.  */
+          else if (strcmp (long_options[option_index].name, "rmtlisten") == 0)
+          {
+            if (local_args_info.rmtlisten_given)
+              {
+                fprintf (stderr, "%s: `--rmtlisten' option given more than once%s\n", argv[0], (additional_error ? additional_error : ""));
+                goto failure;
+              }
+            if (args_info->rmtlisten_given && ! override)
+              continue;
+            local_args_info.rmtlisten_given = 1;
+            args_info->rmtlisten_given = 1;
+            if (args_info->rmtlisten_arg)
+              free (args_info->rmtlisten_arg); /* free previous string */
+            args_info->rmtlisten_arg = gengetopt_strdup (optarg);
+            if (args_info->rmtlisten_orig)
+              free (args_info->rmtlisten_orig); /* free previous string */
+            args_info->rmtlisten_orig = gengetopt_strdup (optarg);
+          }
+          /* TCP port to bind to for authentication requests.  */
+          else if (strcmp (long_options[option_index].name, "rmtport") == 0)
+          {
+            if (local_args_info.rmtport_given)
+              {
+                fprintf (stderr, "%s: `--rmtport' option given more than once%s\n", argv[0], (additional_error ? additional_error : ""));
+                goto failure;
+              }
+            if (args_info->rmtport_given && ! override)
+              continue;
+            local_args_info.rmtport_given = 1;
+            args_info->rmtport_given = 1;
+            args_info->rmtport_arg = strtol (optarg,&stop_char,0);
+            if (args_info->rmtport_orig)
+              free (args_info->rmtport_orig); /* free previous string */
+            args_info->rmtport_orig = gengetopt_strdup (optarg);
+          }
+          /* Password used when performing remote config.  */
+          else if (strcmp (long_options[option_index].name, "rmtpasswd") == 0)
+          {
+            if (local_args_info.rmtpasswd_given)
+              {
+                fprintf (stderr, "%s: `--rmtpasswd' option given more than once%s\n", argv[0], (additional_error ? additional_error : ""));
+                goto failure;
+              }
+            if (args_info->rmtpasswd_given && ! override)
+              continue;
+            local_args_info.rmtpasswd_given = 1;
+            args_info->rmtpasswd_given = 1;
+            if (args_info->rmtpasswd_arg)
+              free (args_info->rmtpasswd_arg); // free previous string 
+            args_info->rmtpasswd_arg = gengetopt_strdup (optarg);
+            if (args_info->rmtpasswd_orig)
+              free (args_info->rmtpasswd_orig); // free previous string 
+            args_info->rmtpasswd_orig = gengetopt_strdup (optarg);
+          }
+          else if (strcmp (long_options[option_index].name, "bandwidthmaxup") == 0)
+          {
+            if (local_args_info.bandwidthmaxup_given)
+              {
+                fprintf (stderr, "%s: `--bandwidthmaxup' option given more than once%s\n", argv[0], (additional_error ? additional_error : ""));
+                goto failure;
+              }
+            if (args_info->bandwidthmaxup_given && ! override)
+              continue;
+            local_args_info.bandwidthmaxup_given = 1;
+            args_info->bandwidthmaxup_given = 1;
+            args_info->bandwidthmaxup_arg = strtol (optarg,&stop_char,0);
+            if (args_info->bandwidthmaxup_orig)
+              free (args_info->bandwidthmaxup_orig); /* free previous string */
+            args_info->bandwidthmaxup_orig = gengetopt_strdup (optarg);
+          }
+          else if (strcmp (long_options[option_index].name, "bandwidthmaxdown") == 0)
+          {
+            if (local_args_info.bandwidthmaxdown_given)
+              {
+                fprintf (stderr, "%s: `--bandwidthmaxdown' option given more than once%s\n", argv[0], (additional_error ? additional_error : ""));
+                goto failure;
+              }
+            if (args_info->bandwidthmaxdown_given && ! override)
+              continue;
+            local_args_info.bandwidthmaxdown_given = 1;
+            args_info->bandwidthmaxdown_given = 1;
+            args_info->bandwidthmaxdown_arg = strtol (optarg,&stop_char,0);
+            if (args_info->bandwidthmaxdown_orig)
+              free (args_info->bandwidthmaxdown_orig); /* free previous string */
+            args_info->bandwidthmaxdown_orig = gengetopt_strdup (optarg);
+          }
           break;
         case '?':	/* Invalid option.  */
           /* `getopt_long' already printed an error message.  */

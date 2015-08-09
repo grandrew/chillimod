@@ -1,1 +1,1 @@
-# dummy
+lookup.o: lookup.c
