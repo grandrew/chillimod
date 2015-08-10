@@ -1486,7 +1486,7 @@ int redir_accept(struct redir_t *redir) {
   int bufsize = REDIR_MAXBUFFER;
   char buffer[bufsize];
   int buflen;
-  int status;
+  int status, mylockfd, do_radius;
   char hexchal[1+(2*REDIR_MD5LEN)];
   unsigned char challenge[REDIR_MD5LEN];
   struct redir_msg_t msg;
@@ -1623,11 +1623,24 @@ int redir_accept(struct redir_t *redir) {
     termstate = REDIR_TERM_RADIUS;
     if (optionsdebug) printf("Calling radius\n");
 
-    if (optionsdebug) printf("redir_accept: Sending redius request\n");
-    redir_radius(redir, &address.sin_addr, &conn);
-
-    termstate = REDIR_TERM_REPLY;
-    if (optionsdebug) printf("Received radius reply\n");
+    if ((mylockfd = open ("/etc/noradius.lck", O_RDWR)) < 0) {
+        do_radius = 0;
+    } else {
+        do_radius = 1;
+        close(mylockfd);
+    }
+    
+    if(do_radius) {
+        if (optionsdebug) printf("redir_accept: Sending redius request\n");
+        redir_radius(redir, &address.sin_addr, &conn);
+    
+        termstate = REDIR_TERM_REPLY;
+        if (optionsdebug) printf("Received radius reply\n");
+    } else {
+        if (optionsdebug) printf("Imitating radius reply\n");
+        termstate = REDIR_TERM_REPLY;
+        conn.response = REDIR_SUCCESS;
+    }
 
     if (conn.response == REDIR_SUCCESS) { /* Radius-Accept */
       redir_reply(redir, new_socket, &conn, conn.response, conn.sessiontimeout,
