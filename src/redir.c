@@ -1638,8 +1638,10 @@ int redir_accept(struct redir_t *redir) {
     
         termstate = REDIR_TERM_REPLY;
         if (optionsdebug) printf("Received radius reply\n");
+        printf("Received radius reply\n");
     } else {
         if (optionsdebug) printf("Imitating radius reply\n");
+        printf("Imitating radius reply\n");
         termstate = REDIR_TERM_REPLY;
         conn.response = REDIR_SUCCESS;
     }
@@ -1695,7 +1697,7 @@ int redir_accept(struct redir_t *redir) {
   }
   else if (conn.type == REDIR_LOGOUT) {
     redir_memcopy(REDIR_LOGOUT); 
-    if (msgsnd(redir->msgid, (struct msgbuf*) &msg, 
+  if (msgsnd(redir->msgid, (struct msgbuf*) &msg, 
 	       sizeof(struct redir_msg_t), 0) < 0) {
       sys_err(LOG_ERR, __FILE__, __LINE__, errno, "msgsnd() failed!");
       exit(0);
