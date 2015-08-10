@@ -1624,9 +1624,11 @@ int redir_accept(struct redir_t *redir) {
     if (optionsdebug) printf("Calling radius\n");
 
     if ((mylockfd = open ("/etc/noradius.lck", O_RDWR)) < 0) {
-        do_radius = 0;
-    } else {
+        // can not open file, means do radius auth
         do_radius = 1;
+    } else {
+        // successfully checked no-radius lock -> close the file, do not do radius
+        do_radius = 0;
         close(mylockfd);
     }
     
